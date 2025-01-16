@@ -1,4 +1,5 @@
 #!/bin/sh
+set -e
 
 ## WebRTC library build script
 ## Created by Stasel
@@ -13,10 +14,11 @@ BRANCH="${BRANCH:-master}"
 IOS="${IOS:-false}"
 MACOS="${MACOS:-false}"
 MAC_CATALYST="${MAC_CATALYST:-false}"
+ENABLE_DSYMS="${ENABLE_DSYMS:-false}"
 
 OUTPUT_DIR="./out"
 XCFRAMEWORK_DIR="out/WebRTC.xcframework"
-COMMON_GN_ARGS="is_debug=${DEBUG} rtc_libvpx_build_vp9=${BUILD_VP9} is_component_build=false rtc_include_tests=false rtc_enable_objc_symbol_export=true enable_stripping=true enable_dsyms=false use_lld=true rtc_ios_use_opengl_rendering=true"
+COMMON_GN_ARGS="is_debug=${DEBUG} rtc_libvpx_build_vp9=${BUILD_VP9} is_component_build=false rtc_include_tests=false rtc_enable_objc_symbol_export=true enable_stripping=true enable_dsyms=${ENABLE_DSYMS} use_lld=true rtc_ios_use_opengl_rendering=true"
 PLISTBUDDY_EXEC="/usr/libexec/PlistBuddy"
 
 build_iOS() {
@@ -149,6 +151,17 @@ if [[ "$IOS" = true ]]; then
 
     lipo -create -output  "${XCFRAMEWORK_DIR}/${IOS_LIB_IDENTIFIER}/WebRTC.framework/WebRTC" ${LIPO_IOS_FLAGS}
     lipo -create -output "${XCFRAMEWORK_DIR}/${IOS_SIM_LIB_IDENTIFIER}/WebRTC.framework/WebRTC" ${LIPO_IOS_SIM_FLAGS}
+    
+    if [[ "$ENABLE_DSYMS" = true ]]; then
+        mkdir "${XCFRAMEWORK_DIR}/${IOS_LIB_IDENTIFIER}/dSYMs"
+        cp -r out/ios-arm64-device/WebRTC.dSYM "${XCFRAMEWORK_DIR}/${IOS_LIB_IDENTIFIER}/dSYMs"
+        
+        mkdir -p "${XCFRAMEWORK_DIR}/${IOS_SIM_LIB_IDENTIFIER}/dSYMs/WebRTC.dSYM/Contents/Resources/DWARF"
+        cp out/ios-x64-simulator/WebRTC.dSYM/Contents/Info.plist "${XCFRAMEWORK_DIR}/${IOS_SIM_LIB_IDENTIFIER}/dSYMs/WebRTC.dSYM/Contents"
+        lipo -create -output "${XCFRAMEWORK_DIR}/${IOS_SIM_LIB_IDENTIFIER}/dSYMs/WebRTC.dSYM/Contents/Resources/DWARF/WebRTC" \
+            out/ios-x64-simulator/WebRTC.dSYM/Contents/Resources/DWARF/WebRTC \
+            out/ios-arm64-simulator/WebRTC.dSYM/Contents/Resources/DWARF/WebRTC
+    fi
 
     # codesign simulator framework for local development.
     # This makes it possible for Swift Packages to run Unit Tests and show SwiftUI Previews.
@@ -169,6 +182,15 @@ if [ "$MACOS" = true ]; then
 
     cp -RP out/macos-x64/WebRTC.framework "${XCFRAMEWORK_DIR}/${MAC_LIB_IDENTIFIER}"
     lipo -create -output "${XCFRAMEWORK_DIR}/${MAC_LIB_IDENTIFIER}/WebRTC.framework/Versions/A/WebRTC" out/macos-x64/WebRTC.framework/WebRTC out/macos-arm64/WebRTC.framework/WebRTC
+    
+    if [[ "$ENABLE_DSYMS" = true ]]; then
+        mkdir -p "${XCFRAMEWORK_DIR}/${MAC_LIB_IDENTIFIER}/dSYMs/WebRTC.dSYM/Contents/Resources/DWARF"
+        cp out/macos-x64/WebRTC.dSYM/Contents/Info.plist "${XCFRAMEWORK_DIR}/${MAC_LIB_IDENTIFIER}/dSYMs/WebRTC.dSYM/Contents"
+        lipo -create -output "${XCFRAMEWORK_DIR}/${MAC_LIB_IDENTIFIER}/dSYMs/WebRTC.dSYM/Contents/Resources/DWARF/WebRTC" \
+            out/macos-x64/WebRTC.dSYM/Contents/Resources/DWARF/WebRTC \
+            out/macos-arm64/WebRTC.dSYM/Contents/Resources/DWARF/WebRTC
+    fi
+    
     LIB_COUNT=$((LIB_COUNT+1))
 fi
 
@@ -184,6 +206,15 @@ if [ "$MAC_CATALYST" = true ]; then
 
     cp -RP out/catalyst-x64/WebRTC.framework "${XCFRAMEWORK_DIR}/${CATALYST_LIB_IDENTIFIER}"
     lipo -create -output "${XCFRAMEWORK_DIR}/${CATALYST_LIB_IDENTIFIER}/WebRTC.framework/Versions/A/WebRTC" out/catalyst-x64/WebRTC.framework/WebRTC out/catalyst-arm64/WebRTC.framework/WebRTC
+    
+    if [[ "$ENABLE_DSYMS" = true ]]; then
+        mkdir -p "${XCFRAMEWORK_DIR}/${CATALYST_LIB_IDENTIFIER}/dSYMs/WebRTC.dSYM/Contents/Resources/DWARF"
+        cp out/catalyst-x64/WebRTC.dSYM/Contents/Info.plist "${XCFRAMEWORK_DIR}/${CATALYST_LIB_IDENTIFIER}/dSYMs/WebRTC.dSYM/Contents"
+        lipo -create -output "${XCFRAMEWORK_DIR}/${CATALYST_LIB_IDENTIFIER}/dSYMs/WebRTC.dSYM/Contents/Resources/DWARF/WebRTC" \
+            out/catalyst-x64/WebRTC.dSYM/Contents/Resources/DWARF/WebRTC \
+            out/catalyst-arm64/WebRTC.dSYM/Contents/Resources/DWARF/WebRTC
+    fi
+    
     LIB_COUNT=$((LIB_COUNT+1))
 fi
 
