@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import telegram
 
 GITHUB_TOKEN=os.environ.get("GITHUB_TOKEN")
+GITHUB_REPOSITORY=os.environ.get("GITHUB_REPOSITORY")
 TELEGRAM_TOKEN=os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID")
 
@@ -24,11 +25,15 @@ class BuildMetadata:
 
 def getNextRelease():
     # Get current version
-    releases = requests.get("https://api.github.com/repos/stasel/WebRTC/releases", headers={'Authorization': f"token {GITHUB_TOKEN}"}).json()
+    releases = requests.get(f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases", headers={'Authorization': f"token {GITHUB_TOKEN}"}).json()
     print(releases)
-    latestReleaseVersion = int(releases[0]["tag_name"].split(".")[0])
-    latestReleaseDate = datetime.fromisoformat(releases[0]["published_at"].replace("Z", ""))
-    print(f"Latest release: version {latestReleaseVersion}, date: {latestReleaseDate}")
+    if not releases:
+        print("No releases found. Starting at 130.")
+        latestReleaseVersion = 129
+    else:
+        latestReleaseVersion = int(releases[0]["tag_name"].split(".")[0])
+        latestReleaseDate = datetime.fromisoformat(releases[0]["published_at"].replace("Z", ""))
+        print(f"Latest release: version {latestReleaseVersion}, date: {latestReleaseDate}")
 
     # Get next version
     nextReleaseVersion = latestReleaseVersion + 1
@@ -49,8 +54,9 @@ def buildWebRTC(branch):
     os.environ["BUILD_VP9"] = "true"
     os.environ["BRANCH"] = branch
     os.environ["IOS"] = "true"
-    os.environ["MACOS"] = "true"
-    os.environ["MAC_CATALYST"] = "true"
+    os.environ["MACOS"] = "false"
+    os.environ["MAC_CATALYST"] = "false"
+    os.environ["ENABLE_DSYMS"] = "true"
 
     return os.system('sh scripts/build.sh') == 0
 
@@ -72,7 +78,7 @@ def createReleaseDraft(release, buildMetadata):
         'body': body
     }
     headers = {'accept': 'application/vnd.github.v3+json', 'Authorization': f'token {GITHUB_TOKEN}'}
-    return requests.post("https://api.github.com/repos/stasel/WebRTC/releases", json = fields, headers = headers).json()
+    return requests.post(f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases", json = fields, headers = headers).json()
 
 def uploadReleaseAsset(url, assetLocalPath, assetName):
     url = url.replace(u'{?name,label}','')
@@ -94,7 +100,7 @@ def createPullRequest(release, head):
         'base': 'latest',
         'body': 'Created by an automated sotfware 🤖'
     }
-    response = requests.post("https://api.github.com/repos/stasel/WebRTC/pulls", json = body, headers = headers)
+    response = requests.post(f"https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls", json = body, headers = headers)
     success = response.status_code == requests.codes.created
     if not success:
         print(response)
@@ -103,6 +109,10 @@ def createPullRequest(release, head):
 if __name__ == "__main__":
     if not GITHUB_TOKEN:
         print("❌ GITHUB_TOKEN environment variable is not provided")
+        os._exit(os.EX_SOFTWARE)
+        
+    if not GITHUB_REPOSITORY:
+        print("❌ GITHUB_REPOSITORY environment variable is not provided")
         os._exit(os.EX_SOFTWARE)
 
     # Get next release details
@@ -134,6 +144,11 @@ if __name__ == "__main__":
     # Create new release draft
     print("➡️ Creating new release draft...")
     githubReleaseDraft = createReleaseDraft(nextRelease ,buildMetadata)
+    if not githubReleaseDraft:
+        print("❌ Failed to create release draft")
+        os._exit(os.EX_SOFTWARE)
+    
+    print("GitHub API Response:", githubReleaseDraft)
 
     # Upload asset to github
     print("➡️ Uploading asset to github...")
@@ -157,12 +172,13 @@ if __name__ == "__main__":
     print("➡️ Applying code changes...")
     os.system(f"sed -i '' -E 's/[0-9]+.0.0\/WebRTC-M[0-9]+/{nextRelease.version}.0.0\/WebRTC-M{nextRelease.version}/g' Package.swift WebRTC-lib.podspec")
     os.system(f"sed -i '' -E 's/checksum: \"[0-9a-f]+\"/checksum: \"{buildMetadata.checksum}\"/g' Package.swift WebRTC-lib.podspec ")
+    os.system(f"sed -i '' -E 's|github.com/[^/]+/[^/]+|github.com/{GITHUB_REPOSITORY}|g' Package.swift WebRTC-lib.podspec")
     os.system(f"sed -i '' -E 's/.upToNextMajor\\(\"[0-9]+.0.0/.upToNextMajor\\(\"{nextRelease.version}.0.0/g' README.md")
     os.system(f"sed -i '' -E 's/spec.version      = \"[0-9]+.0.0\"/spec.version      = \"{nextRelease.version}.0.0\"/g' WebRTC-lib.podspec")
     cartageFile = open("WebRTC.json", 'r')
 
     cartageJSON = json.loads(cartageFile.read())
-    cartageJSON[f'{nextRelease.version}.0.0'] = f'https://github.com/stasel/WebRTC/releases/download/{nextRelease.version}.0.0/WebRTC-M{nextRelease.version}.xcframework.zip'
+    cartageJSON[f'{nextRelease.version}.0.0'] = f'https://github.com/{GITHUB_REPOSITORY}/releases/download/{nextRelease.version}.0.0/WebRTC-M{nextRelease.version}.xcframework.zip'
     cartageFile.close()
     cartageJSONWrite = open("WebRTC.json", 'w')
     cartageJSONWrite.write(json.dumps(cartageJSON, indent=4, sort_keys=True))
@@ -186,7 +202,7 @@ if __name__ == "__main__":
     if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
         print("➡️ Sending Telegram notification...")
         bot = telegram.Bot(token=TELEGRAM_TOKEN)
-        message = f"New WebRTC Release M{nextRelease.version} is now available.\nCheck the PR here: https://github.com/stasel/WebRTC/pulls"
+        message = f"New WebRTC Release M{nextRelease.version} is now available.\nCheck the PR here: https://github.com/{GITHUB_REPOSITORY}/pulls"
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
     print(f"✅ Done")
